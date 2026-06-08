@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * 系统统一身份认证中心
- * 已修复所有的编译报错，并完全恢复原有的注册和信息获取功能
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -37,7 +36,7 @@ public class AuthController {
 
     @PostMapping("/login")
     public Result<AuthDto.LoginResp> login(@RequestBody @Valid AuthDto.LoginReq req) {
-        // 修复1：恢复您原本完美的逻辑，直接从数据库查询并比对密码，避免使用未定义的 UserDetailsImpl 导致强转报错
+        // 查库并校验密码
         SysUser user = sysUserMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, req.getUsername())
         );
@@ -49,25 +48,23 @@ public class AuthController {
             return Result.error(403, "账号已被禁用，请联系管理员");
         }
 
-        // 修复2：generateToken 第一个参数严格要求 Long 类型，去除了错误的 .toString()
+        // 签发 JWT Token
         String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRoleCode());
 
         AuthDto.LoginResp resp = new AuthDto.LoginResp();
         resp.setToken(token);
-        // 雪花算法ID给前端需转String防精度丢失
-        resp.setUserId(user.getId().toString());
+
+        // 【已修复】：AuthDto 中 userId 为 Long，直接传入 user.getId() 即可
+        resp.setUserId(user.getId());
+
         resp.setRole("ROLE_" + user.getRoleCode());
         resp.setRealName(user.getRealName());
 
-        // 修复3：Result 统一响应类中不存在 success(data, message) 方法，改回正常调用
         return Result.success(resp);
     }
 
-    // ================= 恢复被删除的原有功能 =================
-
     /**
-     * 临时存放的注册请求载荷
-     * (为了防止您再次修改 AuthDto，直接内置在此，保证100%编译通过)
+     * 注册请求载荷
      */
     @Data
     public static class RegisterReq {
@@ -81,7 +78,7 @@ public class AuthController {
     }
 
     /**
-     * 恢复注册功能
+     * 注册功能
      */
     @PostMapping("/register")
     public Result<Void> register(@RequestBody @Valid RegisterReq req) {
@@ -94,7 +91,7 @@ public class AuthController {
 
         SysUser user = new SysUser();
         user.setUsername(req.getUsername());
-        user.setPassword(passwordEncoder.encode(req.getPassword())); // BCrypt加密
+        user.setPassword(passwordEncoder.encode(req.getPassword())); // BCrypt强哈希加密
         user.setRealName(req.getRealName());
         user.setRoleCode(req.getRoleCode());
         user.setStatus(1);
@@ -104,7 +101,7 @@ public class AuthController {
     }
 
     /**
-     * 恢复获取当前用户信息功能
+     * 获取当前登录用户信息
      */
     @GetMapping("/info")
     public Result<Map<String, Object>> getInfo(HttpServletRequest request) {
@@ -119,29 +116,31 @@ public class AuthController {
         SysUser user = sysUserMapper.selectById(userId);
 
         Map<String, Object> data = new HashMap<>();
-        data.put("userId", user.getId().toString());
+        data.put("userId", user.getId().toString()); // 此处返回给前端转String防JS精度丢失
         data.put("username", user.getUsername());
         data.put("role", "ROLE_" + user.getRoleCode());
+        data.put("realName", user.getRealName());
         return Result.success(data);
     }
 
+    /**
+     * 安全注销
+     */
     @PostMapping("/logout")
     public Result<Void> logout(HttpServletRequest request) {
         String bearerToken = request.getHeader("Authorization");
         if (StringUtils.hasText(bearerToken) && bearerToken.startsWith("Bearer ")) {
             String jwt = bearerToken.substring(7);
             try {
-                // 将失效token存入Redis黑名单 (兜底24小时)
+                // 将失效的 token 存入 Redis 黑名单，有效拦截未过期的注销 token
                 redisTemplate.opsForValue().set(
                         RedisConsts.TOKEN_BLACKLIST_PREFIX + jwt,
                         System.currentTimeMillis(),
                         24, TimeUnit.HOURS
                 );
             } catch (Exception e) {
-                // Ignore Redis errors during logout
             }
         }
-        // 修复4：Result.success(null, msg) 不存在，改回正常调用
         return Result.success();
     }
 }
