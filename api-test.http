@@ -1,0 +1,71 @@
+### 环境变量配置 (IDEA 环境可以直接在顶部定义)
+@baseUrl = http://localhost:8080/api/v1
+@adminToken = {{login.response.body.data.token}}
+@paperId = {{createPaper.response.body.data}}
+
+### 1. 管理员登录 (获取 Token)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "123456"
+}
+
+### ------------------- 试卷管理 API 测试 -------------------
+
+### 2. 试卷列表分页查询
+GET {{baseUrl}}/admin/paper/page?pageNo=1&pageSize=10
+Authorization: Bearer {{adminToken}}
+
+### 3. 手动创建试卷 (组卷)
+# @name createPaper
+POST {{baseUrl}}/admin/paper/create
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "2026年度Java高级工程师晋升考核",
+  "durationMins": 120,
+  "passScore": 60,
+  "questionList": [
+    {
+      "questionId": 1,
+      "itemScore": 10,
+      "sortNum": 1
+    }
+  ]
+}
+
+### 4. 发布试卷 (核心: 预热到 Redis)
+# 注意：这一步要求试卷关联的题目在 exam_question 表中真实存在，否则会报错
+PUT {{baseUrl}}/admin/paper/publish/{{paperId}}
+Authorization: Bearer {{adminToken}}
+
+### ------------------- 考试流转 API 测试 (需先注册/模拟普通用户) -------------------
+
+### 5. 获取试卷详情 (万人并发测试接口 - 直接读Redis)
+GET {{baseUrl}}/exam/paper/detail/{{paperId}}
+Authorization: Bearer {{adminToken}}
+
+### 6. 答题心跳保存
+POST {{baseUrl}}/exam/session/heartbeat
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "paperId": {{paperId}},
+  "questionId": 1,
+  "userAnswer": "B"
+}
+
+### 7. 提交试卷 (发送 MQ)
+POST {{baseUrl}}/exam/submit
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "paperId": {{paperId}},
+  "forceSubmit": false
+}
