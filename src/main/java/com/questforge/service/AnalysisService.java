@@ -2,191 +2,90 @@ package com.questforge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.questforge.common.RedisConsts;
-import com.questforge.dto.AdminDto;
 import com.questforge.dto.AnalysisDto;
-import com.questforge.entity.*;
+import com.questforge.entity.SysUser;
+import com.questforge.entity.UserStageProgress;
+import com.questforge.mapper.SysUserMapper;
+import com.questforge.mapper.UserStageProgressMapper;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
-@Slf4j
+/**
+ * 学习项目数据分析与报表服务 (真实有效版)
+ */
 @Service
 @RequiredArgsConstructor
 public class AnalysisService {
 
-    private final ExamPaperMapper examPaperMapper;
-    private final ExamRecordMapper examRecordMapper;
-    private final ExamUserAnswerMapper examUserAnswerMapper;
-    private final ExamQuestionMapper examQuestionMapper;
+    private final UserStageProgressMapper progressMapper;
     private final SysUserMapper sysUserMapper;
     private final RedisTemplate<String, Object> redisTemplate;
 
     /**
-     * 获取用户待考列表
+     * 真实获取单场学习计划的宏观统计大盘
      */
-    public List<Map<String, Object>> getPendingPapers(Long userId) {
-        List<ExamPaper> publishedPapers = examPaperMapper.selectList(new LambdaQueryWrapper<ExamPaper>().eq(ExamPaper::getPaperStatus, 1));
-        List<ExamRecord> userRecords = examRecordMapper.selectList(new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getUserId, userId));
-        Set<Long> attendedPaperIds = userRecords.stream().map(ExamRecord::getPaperId).collect(Collectors.toSet());
+    public AnalysisDto.ProjectStatsResp getProjectStatistics(Long projectId) {
+        // 1. 获取该项目下所有的关卡进度流转记录
+        List<UserStageProgress> allProgress = progressMapper.selectList(
+                new LambdaQueryWrapper<UserStageProgress>().eq(UserStageProgress::getProjectId, projectId)
+        );
 
-        LocalDateTime now = LocalDateTime.now();
+        // 2. 统计参与总人数 (依据 userId 去重)
+        long totalUsers = allProgress.stream().map(UserStageProgress::getUserId).distinct().count();
 
-        return publishedPapers.stream()
-                .filter(p -> !attendedPaperIds.contains(p.getId()))
-                .filter(p -> p.getExamEndTime() != null && now.isBefore(p.getExamEndTime())) // 必须没过截止时间
-                .map(p -> {
-                    Map<String, Object> dto = new HashMap<>();
-                    dto.put("paperId", p.getId().toString());
-                    dto.put("title", p.getTitle());
-                    dto.put("durationMins", p.getDurationMins());
-                    dto.put("totalScore", p.getTotalScore());
-                    dto.put("examStartTime", p.getExamStartTime());
-                    dto.put("examEndTime", p.getExamEndTime());
-                    dto.put("allowQuit", p.getAllowQuit() == 1);
-                    dto.put("allowSwitchScreen", p.getAllowSwitchScreen() == 1);
-                    dto.put("isStarted", !now.isBefore(p.getExamStartTime()));
-                    return dto;
-                }).collect(Collectors.toList());
-    }
+        // 3. 计算平均分
+        double avgScore = allProgress.stream().mapToInt(p -> p.getCurrentScore() == null ? 0 : p.getCurrentScore()).average().orElse(0.0);
 
-    /**
-     * 管理端：获取单场考试分析大盘统计数据
-     */
-    public AnalysisDto.DashboardResp getExamStatistics(Long paperId) {
-        ExamPaper paper = examPaperMapper.selectById(paperId);
-        List<ExamRecord> records = examRecordMapper.selectList(new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getPaperId, paperId).eq(ExamRecord::getExamStatus, 1));
+        // 4. 计算通关率 (状态为 4-已通关 的人数)
+        long passedCount = allProgress.stream().filter(p -> p.getStatus() == 4).map(UserStageProgress::getUserId).distinct().count();
+        String passRate = totalUsers == 0 ? "0%" : String.format("%.1f%%", (double) passedCount / totalUsers * 100);
 
-        AnalysisDto.DashboardResp resp = new AnalysisDto.DashboardResp();
+        // 5. 计算分数段分布情况
+        Map<String, Long> distribution = new LinkedHashMap<>();
+        distribution.put("0-59", allProgress.stream().filter(p -> p.getCurrentScore() != null && p.getCurrentScore() < 60).count());
+        distribution.put("60-79", allProgress.stream().filter(p -> p.getCurrentScore() != null && p.getCurrentScore() >= 60 && p.getCurrentScore() < 80).count());
+        distribution.put("80-89", allProgress.stream().filter(p -> p.getCurrentScore() != null && p.getCurrentScore() >= 80 && p.getCurrentScore() < 90).count());
+        distribution.put("90-100", allProgress.stream().filter(p -> p.getCurrentScore() != null && p.getCurrentScore() >= 90).count());
 
-        int currentStatus = paper.getPaperStatus();
-        // 准确判断考试是否结束
-        if (currentStatus == 1 && paper.getExamEndTime() != null) {
-            if (LocalDateTime.now().isAfter(paper.getExamEndTime())) {
-                currentStatus = 2;
-            }
-        }
-        resp.setPaperStatus(currentStatus);
-
-        int totalParticipants = records.size();
-        resp.setTotalParticipants(totalParticipants);
-
-        if (totalParticipants == 0) {
-            resp.setAverageScore(0.0); resp.setHighestScore(0); resp.setPassRate("0%");
-            return resp;
-        }
-
-        int maxScore = 0, sumScore = 0, passCount = 0;
-        Map<String, Integer> dist = new LinkedHashMap<>();
-        dist.put("0-59", 0); dist.put("60-79", 0); dist.put("80-89", 0); dist.put("90-100", 0);
-
-        for (ExamRecord r : records) {
-            int s = r.getTotalScore() == null ? 0 : r.getTotalScore();
-            sumScore += s; maxScore = Math.max(maxScore, s);
-            if (s >= paper.getPassScore()) passCount++;
-            if (s < 60) dist.put("0-59", dist.get("0-59") + 1);
-            else if (s < 80) dist.put("60-79", dist.get("60-79") + 1);
-            else if (s < 90) dist.put("80-89", dist.get("80-89") + 1);
-            else dist.put("90-100", dist.get("90-100") + 1);
-        }
-
-        resp.setHighestScore(maxScore);
-        resp.setAverageScore(new BigDecimal((double) sumScore / totalParticipants).setScale(1, RoundingMode.HALF_UP).doubleValue());
-        resp.setPassRate(new BigDecimal((double) passCount / totalParticipants * 100).setScale(1, RoundingMode.HALF_UP) + "%");
-        resp.setScoreDistribution(dist);
+        AnalysisDto.ProjectStatsResp resp = new AnalysisDto.ProjectStatsResp();
+        resp.setTotalParticipants(totalUsers);
+        resp.setAverageScore(avgScore);
+        resp.setPassRate(passRate);
+        resp.setScoreDistribution(distribution);
         return resp;
     }
 
     /**
-     * 获取用户单场考试报表 (大字报)
+     * 真实获取单场学习计划的动态排行榜 (基于 Redis ZSet)
      */
-    public AnalysisDto.ReportResp getUserReport(Long recordId, Long userId) {
-        ExamRecord record = examRecordMapper.selectById(recordId);
-        if (record == null || !record.getUserId().equals(userId)) throw new RuntimeException("无权查看该成绩单");
-        if (record.getExamStatus() == 0) throw new RuntimeException("考试尚未完成，无法查看成绩");
+    public List<AnalysisDto.LeaderboardResp> getLeaderboard(Long projectId) {
+        String key = RedisConsts.LEADERBOARD_PREFIX + projectId;
 
-        AnalysisDto.ReportResp resp = new AnalysisDto.ReportResp();
-        resp.setTotalScore(record.getTotalScore());
+        // 获取 Redis 中排名前 20 的分数集合 (分数从大到小)
+        Set<ZSetOperations.TypedTuple<Object>> topUsers = redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, 19);
+        List<AnalysisDto.LeaderboardResp> result = new ArrayList<>();
 
-        Long totalCount = examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getPaperId, record.getPaperId()));
-        Long lowerCount = examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>().eq(ExamRecord::getPaperId, record.getPaperId()).lt(ExamRecord::getTotalScore, record.getTotalScore()));
-
-        if (totalCount > 1) {
-            double percent = (double) lowerCount / (totalCount - 1) * 100;
-            resp.setBeatPercentage(String.format("%.1f%%", percent));
-        } else {
-            resp.setBeatPercentage("100%");
+        if (topUsers == null || topUsers.isEmpty()) {
+            return result;
         }
-
-        List<ExamUserAnswer> wrongAnswers = examUserAnswerMapper.selectList(new LambdaQueryWrapper<ExamUserAnswer>().eq(ExamUserAnswer::getRecordId, recordId).eq(ExamUserAnswer::getIsCorrect, 0));
-        List<AnalysisDto.ReportResp.WrongQuestionDetail> wrongDetails = new ArrayList<>();
-        if (!wrongAnswers.isEmpty()) {
-            List<Long> qIds = wrongAnswers.stream().map(ExamUserAnswer::getQuestionId).toList();
-            Map<Long, ExamQuestion> qMap = examQuestionMapper.selectBatchIds(qIds).stream().collect(Collectors.toMap(ExamQuestion::getId, q -> q));
-            for (ExamUserAnswer wa : wrongAnswers) {
-                ExamQuestion q = qMap.get(wa.getQuestionId());
-                if (q != null) {
-                    AnalysisDto.ReportResp.WrongQuestionDetail d = new AnalysisDto.ReportResp.WrongQuestionDetail();
-                    d.setQuestionId(q.getId().toString());
-                    d.setContent(q.getContent());
-                    d.setUserAnswer(wa.getUserAnswer());
-                    d.setStandardAnswer(q.getStandardAnswer());
-                    d.setAnalysis(q.getAnalysis());
-                    wrongDetails.add(d);
-                }
-            }
-        }
-        resp.setWrongQuestions(wrongDetails);
-        return resp;
-    }
-
-    /**
-     * 从 Redis 获取 Top 20 排行榜
-     */
-    public List<AnalysisDto.LeaderboardResp> getTop20Leaderboard(Long paperId) {
-        String key = RedisConsts.LEADERBOARD_PREFIX + paperId;
-        Set<ZSetOperations.TypedTuple<Object>> topTuples = redisTemplate.opsForZSet().reverseRangeWithScores(key, 0, 19);
-
-        List<AnalysisDto.LeaderboardResp> list = new ArrayList<>();
-        if (topTuples == null || topTuples.isEmpty()) return list;
 
         int rank = 1;
-        for (ZSetOperations.TypedTuple<Object> tuple : topTuples) {
-            AnalysisDto.LeaderboardResp dto = new AnalysisDto.LeaderboardResp();
-            dto.setRank(rank++);
-            dto.setScore(tuple.getScore() != null ? tuple.getScore().intValue() : 0);
-            String uIdStr = (String) tuple.getValue();
-            dto.setUserId(uIdStr);
-            SysUser user = sysUserMapper.selectById(Long.parseLong(uIdStr));
-            dto.setRealName(user != null ? user.getRealName() : "神秘考生");
-            list.add(dto);
+        for (ZSetOperations.TypedTuple<Object> tuple : topUsers) {
+            Long userId = Long.valueOf(tuple.getValue().toString());
+            SysUser user = sysUserMapper.selectById(userId);
+
+            AnalysisDto.LeaderboardResp item = new AnalysisDto.LeaderboardResp();
+            item.setRank(rank++);
+            item.setUserId(userId);
+            item.setUsername(user != null ? user.getUsername() : "未知账号");
+            item.setRealName(user != null ? user.getRealName() : "匿名冒险者");
+            item.setScore(tuple.getScore() != null ? tuple.getScore().intValue() : 0);
+            result.add(item);
         }
-        return list;
-    }
-
-
-    /**
-     * 【新增】：获取管理端控制台首页全局统计数据
-     */
-    public AdminDto.DashboardSummaryResp getDashboardSummary() {
-        AdminDto.DashboardSummaryResp summary = new AdminDto.DashboardSummaryResp();
-
-        // 题库总题数
-        summary.setTotalQuestions(examQuestionMapper.selectCount(new LambdaQueryWrapper<ExamQuestion>().eq(ExamQuestion::getIsDeleted, 0)));
-        // 试卷总数
-        summary.setTotalPapers(examPaperMapper.selectCount(new LambdaQueryWrapper<ExamPaper>().eq(ExamPaper::getIsDeleted, 0)));
-        // 累计考试人次
-        summary.setTotalExams(examRecordMapper.selectCount(new LambdaQueryWrapper<ExamRecord>()));
-        // 系统注册考生数
-        summary.setActiveUsers(sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getRoleCode, "USER")));
-
-        return summary;
+        return result;
     }
 }
