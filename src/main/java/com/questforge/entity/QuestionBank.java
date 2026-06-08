@@ -6,26 +6,22 @@ import lombok.Data;
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
-/**
- * 实体: exam_question (试题主表)
- */
 @Data
-@TableName(value = "exam_question", autoResultMap = true)
-public class ExamQuestion implements Serializable {
+@TableName(value = "question_bank", autoResultMap = true)
+public class QuestionBank implements Serializable {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private Long subjectId;
-    private Integer questionType; // 1:单选, 2:多选
+    private Integer type; // 1-单选, 2-多选, 3-判断
     private String content;
 
-    // 利用 MyBatis-Plus 的 TypeHandler 自动处理 JSON 转换
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Object optionsJson;
 
-    private String standardAnswer;
-    private Integer difficulty; // 1易 2中 3难
-    private String analysis;
+    private String answer;
+    private Integer difficulty;
+    private String aiAnalysis; // AI伴学预置解析
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

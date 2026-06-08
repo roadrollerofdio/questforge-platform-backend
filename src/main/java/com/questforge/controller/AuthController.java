@@ -5,7 +5,6 @@ import com.questforge.common.RedisConsts;
 import com.questforge.common.Result;
 import com.questforge.dto.AuthDto;
 import com.questforge.entity.SysUser;
-import com.questforge.mapper.CoreMappers.SysUserMapper;
 import com.questforge.security.JwtUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;

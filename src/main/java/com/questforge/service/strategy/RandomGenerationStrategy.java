@@ -1,10 +1,6 @@
 package com.questforge.service.strategy;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.questforge.entity.ExamPaperQuestion;
-import com.questforge.entity.ExamQuestion;
-import com.questforge.mapper.CoreMappers.ExamPaperQuestionMapper;
-import com.questforge.mapper.CoreMappers.ExamQuestionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;

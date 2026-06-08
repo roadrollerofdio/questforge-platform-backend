@@ -1,7 +1,6 @@
 package com.questforge.security;
 
 import com.questforge.entity.SysUser;
-import com.questforge.mapper.CoreMappers.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.User;

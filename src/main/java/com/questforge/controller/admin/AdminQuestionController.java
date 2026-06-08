@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.questforge.ai.service.AiQuestionService;
 import com.questforge.common.Result;
 import com.questforge.dto.AdminDto;
-import com.questforge.entity.ExamQuestion;
 import com.questforge.service.QuestionService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;

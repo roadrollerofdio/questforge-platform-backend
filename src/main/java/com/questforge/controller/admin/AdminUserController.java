@@ -5,7 +5,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.questforge.common.Result;
 import com.questforge.dto.AdminDto;
 import com.questforge.entity.SysUser;
-import com.questforge.mapper.CoreMappers.SysUserMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
