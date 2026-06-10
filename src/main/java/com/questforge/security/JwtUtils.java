@@ -17,10 +17,11 @@ import java.util.Date;
 @Component
 public class JwtUtils {
 
-    @Value("${jwt.secret}")
+    // 增加配置读取容错：若未读取到，则使用与 application.properties 严格一致的缺省值
+    @Value("${jwt.secret:Y29tcGxleF9hbmRfc2VjdXJlX2p3dF9zZWNyZXRfa2V5X2V4YW1fcGxhdGZvcm1fMjAyNg==}")
     private String secret;
 
-    @Value("${jwt.expiration}")
+    @Value("${jwt.expiration:86400}")
     private Long expiration;
 
     /**

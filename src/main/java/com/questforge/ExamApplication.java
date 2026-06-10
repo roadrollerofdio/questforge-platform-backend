@@ -15,7 +15,7 @@ public class ExamApplication {
         SpringApplication.run(ExamApplication.class, args);
 
         System.out.println("==================================================");
-        System.out.println("========   Exam Platform 服务启动成功!   =========");
+        System.out.println("========   questforge 服务启动成功!   =========");
         System.out.println("========   企业级高并发在线考试系统      =========");
         System.out.println("==================================================");
     }
