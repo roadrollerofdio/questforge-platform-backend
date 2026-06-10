@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * 系统统一身份认证中心
  */
 @RestController
-@RequestMapping("/api/auth")
+@RequestMapping("/api")
 @RequiredArgsConstructor
 public class AuthController {
 

@@ -6,6 +6,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理拦截器
@@ -21,6 +22,13 @@ public class GlobalExceptionHandler {
     public Result<Void> handleRuntimeException(RuntimeException e) {
         log.error("系统业务异常: {}", e.getMessage());
         return Result.error(500, e.getMessage());
+    }
+
+    // 精准捕获 Spring 6.1+ 路由丢失异常，转化为 JSON
+    @ExceptionHandler(NoResourceFoundException.class)
+    public Result<Void> handleNoResourceFound(NoResourceFoundException e) {
+        log.warn("客户端请求了未映射的接口路径: {}", e.getResourcePath());
+        return Result.error(404, "接口链路断开或不存在: " + e.getResourcePath());
     }
 
     /**

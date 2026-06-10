@@ -57,7 +57,7 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 权限放行规则
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/login", "/auth/register").permitAll() // 登录和注册接口全部放行
+                        .requestMatchers("/auth/login","/auth/register","/api/v1/auth/**","/error").permitAll() // 登录和注册接口全部放行
                         .requestMatchers("/exam/analysis/leaderboard").permitAll() // 开放的排行榜
                         .requestMatchers("/ai/**").permitAll() // AI 接口
                         .anyRequest().authenticated()
