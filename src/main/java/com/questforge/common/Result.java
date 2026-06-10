@@ -29,6 +29,15 @@ public class Result<T> implements Serializable {
         return result;
     }
 
+    // ====== 新增：处理带自定义 message 的成功响应，修复 Controller 层报错 ======
+    public static <T> Result<T> success(T data, String message) {
+        Result<T> result = new Result<>();
+        result.setCode(200);
+        result.setMessage(message);
+        result.setData(data);
+        return result;
+    }
+
     public static <T> Result<T> error(Integer code, String message) {
         Result<T> result = new Result<>();
         result.setCode(code);

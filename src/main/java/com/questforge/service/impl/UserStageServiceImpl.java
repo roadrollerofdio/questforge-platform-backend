@@ -35,9 +35,6 @@ public class UserStageServiceImpl implements UserStageService {
     private final StageMapper stageMapper;
     private final RabbitTemplate rabbitTemplate;
 
-    /**
-     * 进入挑战关卡 (极速从 Redis 拉取预热结构)
-     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> enterStage(Long stageId, Long userId) {
@@ -53,7 +50,6 @@ public class UserStageServiceImpl implements UserStageService {
             throw new RuntimeException("该学习计划已结束");
         }
 
-        // 校验关卡解锁状态
         UserStageProgress progress = progressMapper.selectOne(new LambdaQueryWrapper<UserStageProgress>()
                 .eq(UserStageProgress::getUserId, userId).eq(UserStageProgress::getStageId, stageId));
 
@@ -61,7 +57,6 @@ public class UserStageServiceImpl implements UserStageService {
             throw new RuntimeException("当前关卡尚未解锁，请先完成前置关卡！");
         }
 
-        // 状态流转：1(已解锁) -> 2(进行中)
         if (progress.getStatus() == 1) {
             progress.setStatus(2);
             progress.setStartTime(now);
@@ -69,9 +64,7 @@ public class UserStageServiceImpl implements UserStageService {
         } else if (progress.getStatus() >= 3) {
             throw new RuntimeException("该关卡已结算，无法重复挑战");
         }
-        // 如果是 2(进行中) 则为断线重连，直接放行
 
-        // 从 Redis 拉取预热的关卡快照（不含标准答案）
         String stageCacheKey = RedisConsts.STAGE_INFO_PREFIX + stageId;
         Object stageJsonStr = redisTemplate.opsForValue().get(stageCacheKey);
         if (stageJsonStr == null) throw new RuntimeException("关卡数据缓存异常，请联系管理员");
@@ -84,9 +77,6 @@ public class UserStageServiceImpl implements UserStageService {
         return stageData;
     }
 
-    /**
-     * 高频心跳保存进度 (纯 Redis 操作，防掉线)
-     */
     @Override
     public void saveHeartbeat(StageDto.HeartbeatReq req, Long userId) {
         String sessionKey = RedisConsts.getSessionKey(req.getStageId(), userId);
@@ -98,9 +88,6 @@ public class UserStageServiceImpl implements UserStageService {
         redisTemplate.expire(sessionKey, 24, TimeUnit.HOURS);
     }
 
-    /**
-     * 发起强制交卷结算 (状态排他 + MQ削峰)
-     */
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long submitStage(StageDto.SubmitReq req, Long userId) {
@@ -115,7 +102,6 @@ public class UserStageServiceImpl implements UserStageService {
 
             if (progress == null) throw new RuntimeException("未找到挑战记录");
 
-            // 【核心防御】：乐观抢占状态机，确保绝对幂等。2(进行中) -> 3(结算中)
             int updated = progressMapper.update(null, new LambdaUpdateWrapper<UserStageProgress>()
                     .set(UserStageProgress::getStatus, 3)
                     .set(UserStageProgress::getCompleteTime, LocalDateTime.now())
@@ -124,7 +110,6 @@ public class UserStageServiceImpl implements UserStageService {
 
             if (updated == 0) throw new RuntimeException("挑战状态异常或已结算完毕");
 
-            // 投递异步结算指令至 RabbitMQ
             StageDto.MqSubmitMessage mqMessage = new StageDto.MqSubmitMessage();
             mqMessage.setProgressId(progress.getId());
             mqMessage.setUserId(userId);
@@ -133,7 +118,7 @@ public class UserStageServiceImpl implements UserStageService {
             mqMessage.setForceSubmit(req.getForceSubmit());
             mqMessage.setSubmitTimestamp(System.currentTimeMillis());
 
-            rabbitTemplate.convertAndSend(RabbitMQConfig.EXAM_EXCHANGE, RabbitMQConfig.STAGE_SUBMIT_ROUTING_KEY, mqMessage);
+            rabbitTemplate.convertAndSend(RabbitMQConfig.EXAM_EXCHANGE, RabbitMQConfig.EXAM_SUBMIT_ROUTING_KEY, mqMessage);
             return progress.getId();
         } finally {
             redisTemplate.delete(lockKey);

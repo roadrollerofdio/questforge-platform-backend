@@ -1,7 +1,6 @@
 package com.questforge.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.questforge.common.RedisConsts;
 import com.questforge.dto.AnalysisDto;
 import com.questforge.entity.SysUser;
 import com.questforge.entity.UserStageProgress;
@@ -11,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
+import com.questforge.common.RedisConsts;
 
 import java.util.*;
 

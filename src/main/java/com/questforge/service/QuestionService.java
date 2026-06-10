@@ -4,42 +4,41 @@ import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.questforge.dto.AdminDto;
+import com.questforge.entity.QuestionBank;
+import com.questforge.mapper.QuestionBankMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-/**
- * 题库管理业务实现
- */
 @Service
 @RequiredArgsConstructor
 public class QuestionService {
 
-    private final ExamQuestionMapper examQuestionMapper;
+    private final QuestionBankMapper questionBankMapper;
 
     public Long addOrUpdateQuestion(AdminDto.QuestionReq req) {
-        ExamQuestion question = BeanUtil.copyProperties(req, ExamQuestion.class);
+        QuestionBank question = BeanUtil.copyProperties(req, QuestionBank.class);
         if (question.getId() == null) {
-            examQuestionMapper.insert(question);
+            questionBankMapper.insert(question);
         } else {
-            examQuestionMapper.updateById(question);
+            questionBankMapper.updateById(question);
         }
         return question.getId();
     }
 
     public void deleteQuestion(Long id) {
-        examQuestionMapper.deleteById(id);
+        questionBankMapper.deleteById(id);
     }
 
-    public Page<ExamQuestion> pageQuestions(int pageNo, int pageSize, Long subjectId, String keyword) {
-        LambdaQueryWrapper<ExamQuestion> wrapper = new LambdaQueryWrapper<>();
+    public Page<QuestionBank> pageQuestions(int pageNo, int pageSize, Long subjectId, String keyword) {
+        LambdaQueryWrapper<QuestionBank> wrapper = new LambdaQueryWrapper<>();
         if (subjectId != null) {
-            wrapper.eq(ExamQuestion::getSubjectId, subjectId);
+            wrapper.eq(QuestionBank::getSubjectId, subjectId);
         }
         if (StringUtils.hasText(keyword)) {
-            wrapper.like(ExamQuestion::getContent, keyword);
+            wrapper.like(QuestionBank::getContent, keyword);
         }
-        wrapper.orderByDesc(ExamQuestion::getCreateTime);
-        return examQuestionMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
+        wrapper.orderByDesc(QuestionBank::getCreateTime);
+        return questionBankMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
     }
 }
