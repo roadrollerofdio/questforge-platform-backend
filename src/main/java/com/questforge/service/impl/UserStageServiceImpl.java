@@ -108,8 +108,16 @@ public class UserStageServiceImpl implements UserStageService {
             // 缓存缺失: 从数据库构建关卡快照并预热(不含标准答案)
             stageData = buildStageSnapshot(stage);
             redisTemplate.opsForValue().set(stageCacheKey, JSONUtil.toJsonStr(stageData), 12, TimeUnit.HOURS);
+            // #region agent log
+            com.questforge.common.DebugLog.log("H-B", "UserStageServiceImpl:enterStage", "cache MISS, built snapshot from DB",
+                    "{\"stageId\":" + stageId + ",\"snapshotPreview\":" + JSONUtil.quote(abbrev(JSONUtil.toJsonStr(stageData), 600)) + "}");
+            // #endregion
         } else {
             stageData = JSONUtil.parseObj((String) stageJsonStr);
+            // #region agent log
+            com.questforge.common.DebugLog.log("H-B", "UserStageServiceImpl:enterStage", "cache HIT, using existing snapshot",
+                    "{\"stageId\":" + stageId + ",\"cachedPreview\":" + JSONUtil.quote(abbrev(String.valueOf(stageJsonStr), 600)) + "}");
+            // #endregion
         }
         stageData.put("allowSwitchScreen", project.getAllowSwitchScreen() == 1);
         stageData.put("allowQuit", project.getAllowQuit() == 1);
@@ -157,7 +165,17 @@ public class UserStageServiceImpl implements UserStageService {
                 qData.put("id", q.getId().toString());
                 qData.put("type", q.getType());
                 qData.put("content", q.getContent());
-                qData.put("options", parseOptions(q.getOptionsJson()));
+                Object parsedOptions = parseOptions(q.getOptionsJson());
+                qData.put("options", parsedOptions);
+                // #region agent log
+                Object rawOpts = q.getOptionsJson();
+                com.questforge.common.DebugLog.log("H-A", "UserStageServiceImpl:buildStageSnapshot", "question options raw vs parsed",
+                        "{\"questionId\":" + q.getId()
+                        + ",\"rawClass\":" + JSONUtil.quote(rawOpts == null ? "null" : rawOpts.getClass().getName())
+                        + ",\"rawValue\":" + JSONUtil.quote(abbrev(String.valueOf(rawOpts), 300))
+                        + ",\"parsedClass\":" + JSONUtil.quote(parsedOptions == null ? "null" : parsedOptions.getClass().getName())
+                        + ",\"parsedValue\":" + JSONUtil.quote(abbrev(JSONUtil.toJsonStr(parsedOptions), 300)) + "}");
+                // #endregion
                 qData.put("scoreWeight", ref.getScoreWeight());
                 questions.add(qData);
             }
@@ -173,6 +191,13 @@ public class UserStageServiceImpl implements UserStageService {
         snapshot.put("questions", questions);
         return snapshot;
     }
+
+    // #region agent log
+    private static String abbrev(String s, int max) {
+        if (s == null) return "null";
+        return s.length() <= max ? s : s.substring(0, max) + "...(truncated)";
+    }
+    // #endregion
 
     /**
      * optionsJson 兼容: 可能为 JSON 字符串或已被 JacksonTypeHandler 反序列化的对象

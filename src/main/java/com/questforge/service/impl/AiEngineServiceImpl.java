@@ -176,6 +176,15 @@ public class AiEngineServiceImpl implements AiEngineService {
         String apiUrl = sysConfigService.getAiApiUrl();
         String modelName = sysConfigService.getAiModel();
 
+        // #region agent log
+        com.questforge.common.DebugLog.log("H-D/H-E", "AiEngineServiceImpl:streamLlmMessages", "llm request config",
+                "{\"apiUrl\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(apiUrl))
+                + ",\"model\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(modelName))
+                + ",\"keyLength\":" + (apiKey == null ? -1 : apiKey.length())
+                + ",\"keyPrefix\":" + cn.hutool.json.JSONUtil.quote(apiKey == null || apiKey.isBlank() ? "(EMPTY)" : apiKey.substring(0, Math.min(6, apiKey.length())))
+                + ",\"messageCount\":" + messages.size() + "}");
+        // #endregion
+
         JSONObject payload = new JSONObject();
         payload.set("model", modelName);
         payload.set("stream", true);
@@ -217,6 +226,20 @@ public class AiEngineServiceImpl implements AiEngineService {
                 },
                 error -> {
                     log.error("AI WebClient 请求发生异常", error);
+                    // #region agent log
+                    String errDetail = error.getMessage();
+                    String respBody = "";
+                    int statusCode = -1;
+                    if (error instanceof org.springframework.web.reactive.function.client.WebClientResponseException wcre) {
+                        statusCode = wcre.getStatusCode().value();
+                        respBody = wcre.getResponseBodyAsString();
+                    }
+                    com.questforge.common.DebugLog.log("H-D/H-E/H-F", "AiEngineServiceImpl:errorCallback", "llm request failed",
+                            "{\"errorClass\":" + cn.hutool.json.JSONUtil.quote(error.getClass().getName())
+                            + ",\"errorMsg\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(errDetail))
+                            + ",\"httpStatus\":" + statusCode
+                            + ",\"responseBody\":" + cn.hutool.json.JSONUtil.quote(respBody.length() > 400 ? respBody.substring(0, 400) : respBody) + "}");
+                    // #endregion
                     try {
                         emitter.send(SseEmitter.event().data("\n[AI 暂时离开了，请检查网络或 API 配置]"));
                     } catch (IOException e) {
