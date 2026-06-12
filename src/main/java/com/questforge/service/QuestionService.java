@@ -1,6 +1,5 @@
 package com.questforge.service;
 
-import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.questforge.dto.AdminDto;
@@ -17,7 +16,17 @@ public class QuestionService {
     private final QuestionBankMapper questionBankMapper;
 
     public Long addOrUpdateQuestion(AdminDto.QuestionReq req) {
-        QuestionBank question = BeanUtil.copyProperties(req, QuestionBank.class);
+        QuestionBank question = new QuestionBank();
+        question.setId(req.getId());
+        question.setSubjectId(req.getSubjectId());
+        question.setType(req.getType());
+        question.setContent(req.getContent());
+        question.setAnswer(req.getAnswer());
+        question.setDifficulty(req.getDifficulty());
+        question.setAiAnalysis(req.getAnalysis());
+        if (req.getOptions() != null) {
+            question.setOptionsJson(req.getOptions());
+        }
         if (question.getId() == null) {
             questionBankMapper.insert(question);
         } else {

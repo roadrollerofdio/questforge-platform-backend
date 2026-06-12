@@ -38,8 +38,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt)) {
-                if (Boolean.TRUE.equals(redisTemplate.hasKey(RedisConsts.TOKEN_BLACKLIST_PREFIX + jwt))) {
-                    throw new RuntimeException("Token 已失效 (已退出登录)");
+                try {
+                    if (Boolean.TRUE.equals(redisTemplate.hasKey(RedisConsts.TOKEN_BLACKLIST_PREFIX + jwt))) {
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                } catch (Exception ex) {
+                    log.warn("Redis 黑名单校验跳过: {}", ex.getMessage());
                 }
 
                 if (jwtUtils.validateToken(jwt)) {

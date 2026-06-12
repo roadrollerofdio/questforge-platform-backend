@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
  * 管理端 API: 系统用户权限管理
  */
 @RestController
-@RequestMapping("/api/admin/user")
+@RequestMapping("/admin/user")
 @PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 public class AdminUserController {

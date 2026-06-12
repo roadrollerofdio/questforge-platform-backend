@@ -20,13 +20,18 @@ public class UserDetailsServiceImpl implements UserDetailsService {
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        // 严谨的单条查询，防止脏数据导致报错
-        SysUser user = sysUserMapper.selectOne(
-                new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)
-        );
+        SysUser user;
+        // JWT 过滤器传入的是 userId 字符串，需按 ID 查询
+        if (username.matches("\\d+")) {
+            user = sysUserMapper.selectById(Long.parseLong(username));
+        } else {
+            user = sysUserMapper.selectOne(
+                    new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username)
+            );
+        }
 
         if (user == null) {
-            throw new UsernameNotFoundException("用户名不存在: " + username);
+            throw new UsernameNotFoundException("用户不存在: " + username);
         }
 
         return new UserDetailsImpl(user);

@@ -16,6 +16,9 @@ public class RedisConsts {
     // 排行榜 (Type: ZSet)
     public static final String LEADERBOARD_PREFIX = "exam:leaderboard:";
 
+    // 关卡结算获得宝石数 (Type: String) Key: progressId
+    public static final String STAGE_GEMS_PREFIX = "exam:stage:gems:";
+
     // 防重复交卷分布式锁 (Type: String)
     public static final String SUBMIT_LOCK_PREFIX = "lock:exam:submit:";
 

@@ -7,21 +7,29 @@ import java.io.Serializable;
 import java.time.LocalDateTime;
 
 @Data
-@TableName(value = "question_bank", autoResultMap = true)
+@TableName(value = "exam_question", autoResultMap = true)
 public class QuestionBank implements Serializable {
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private Long subjectId;
-    private Integer type; // 1-单选, 2-多选, 3-判断
+
+    @TableField("question_type")
+    private Integer type;
+
     private String content;
 
-    @TableField(typeHandler = JacksonTypeHandler.class)
+    @TableField(value = "options_json", typeHandler = JacksonTypeHandler.class)
+    @com.fasterxml.jackson.annotation.JsonProperty("options")
     private Object optionsJson;
 
+    @TableField("standard_answer")
     private String answer;
+
     private Integer difficulty;
-    private String aiAnalysis; // AI伴学预置解析
+
+    @TableField("analysis")
+    private String aiAnalysis;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

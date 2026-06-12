@@ -24,13 +24,12 @@ public class AdminDto {
         @NotNull(message = "所属科目不能为空")
         private Long subjectId;
         @NotNull(message = "题目类型不能为空")
-        private Integer questionType;
+        private Integer type;
         @NotBlank(message = "题干内容不能为空")
         private String content;
-        @NotNull(message = "选项配置不能为空")
-        private Object optionsJson;
+        private Object options;
         @NotBlank(message = "标准答案不能为空")
-        private String standardAnswer;
+        private String answer;
         private Integer difficulty = 2;
         private String analysis;
     }
@@ -62,8 +61,40 @@ public class AdminDto {
     @Data
     public static class DashboardSummaryResp {
         private Long totalQuestions;
-        private Long totalProjects;
-        private Long totalStages;
+        private Long totalPapers;
+        private Long totalExams;
         private Long activeUsers;
+    }
+
+    @Data
+    public static class SystemSettingsReq {
+        @NotBlank(message = "AI 模型不能为空")
+        private String aiModel;
+        private String aiApiUrl;
+        private String aiApiKey;
+        @NotNull(message = "MQ 延迟不能为空")
+        private Integer mqDelay;
+        @NotNull(message = "Redis 缓存开关不能为空")
+        private Boolean enableRedisCache;
+    }
+
+    @Data
+    public static class SystemSettingsResp {
+        private String aiModel;
+        private String aiApiUrl;
+        private String aiApiKey;
+        private Integer mqDelay;
+        private Boolean enableRedisCache;
+    }
+
+    @Data
+    public static class StageItemResp {
+        private Long refId;
+        private Long itemId;
+        private Integer itemType;
+        private Integer scoreWeight;
+        private Integer sortNum;
+        private String content;
+        private Integer questionType;
     }
 }

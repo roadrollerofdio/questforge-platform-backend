@@ -8,22 +8,37 @@ import java.time.LocalDateTime;
  * 学习路线图/考核项目主表
  */
 @Data
-@TableName("learning_project")
+@TableName("exam_paper")
 public class LearningProject {
 
     @TableId(type = IdType.ASSIGN_ID)
     private Long id;
 
     private String title;
+
+    @TableField("exam_start_time")
     private LocalDateTime startTime;
+
+    @TableField("exam_end_time")
     private LocalDateTime endTime;
 
-    // 防作弊配置
+    @TableField("allow_switch_screen")
     private Integer allowSwitchScreen;
+
+    @TableField("allow_quit")
     private Integer allowQuit;
 
-    // 状态: 0-草稿, 1-已发布, 2-已下线
+    @TableField("paper_status")
     private Integer status;
+
+    @TableField("total_score")
+    private Integer totalScore = 100;
+
+    @TableField("pass_score")
+    private Integer passScore = 60;
+
+    @TableField("duration_mins")
+    private Integer durationMins = 120;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

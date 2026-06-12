@@ -4,6 +4,7 @@ import com.questforge.common.Result;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BindException;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -32,7 +33,16 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 参数校验异常 (@Valid)
+     * 参数校验异常 (@Valid @RequestBody)
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public Result<Void> handleMethodArgumentNotValid(MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getAllErrors().get(0).getDefaultMessage();
+        return Result.error(400, "参数校验失败: " + message);
+    }
+
+    /**
+     * 参数校验异常 (@Valid 表单)
      */
     @ExceptionHandler(BindException.class)
     public Result<Void> handleBindException(BindException e) {

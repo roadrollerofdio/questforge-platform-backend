@@ -20,6 +20,11 @@ public class SysUser implements Serializable {
     private String roleCode; // ADMIN / USER
     private Integer status;  // 1-正常, 0-禁用
 
+    // ====== 游戏化扩展 ======
+    private String nickname;      // 昵称(为空时回退 realName)
+    private Integer gems;         // 宝石余额
+    private String avatarConfig;  // 虚拟形象配置 JSON
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

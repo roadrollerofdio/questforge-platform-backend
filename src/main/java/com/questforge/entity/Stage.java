@@ -28,6 +28,9 @@ public class Stage {
     private Integer durationMins;
     private Integer totalScore;
 
+    // 通关奖励宝石数(管理员设置)
+    private Integer gemReward;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

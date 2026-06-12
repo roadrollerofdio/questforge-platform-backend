@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
  * 系统统一身份认证中心
  */
 @RestController
-@RequestMapping("/api")
+@RequestMapping("/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -95,6 +95,8 @@ public class AuthController {
         user.setRealName(req.getRealName());
         user.setRoleCode(req.getRoleCode());
         user.setStatus(1);
+        user.setNickname(req.getRealName());
+        user.setGems(0);
         sysUserMapper.insert(user);
 
         return Result.success();

@@ -7,10 +7,16 @@ import com.questforge.common.RedisConsts;
 import com.questforge.config.RabbitMQConfig;
 import com.questforge.dto.StageDto;
 import com.questforge.entity.LearningProject;
+import com.questforge.entity.QuestionBank;
 import com.questforge.entity.Stage;
+import com.questforge.entity.StageItemRef;
+import com.questforge.entity.UserAnswer;
 import com.questforge.entity.UserStageProgress;
 import com.questforge.mapper.LearningProjectMapper;
+import com.questforge.mapper.QuestionBankMapper;
+import com.questforge.mapper.StageItemRefMapper;
 import com.questforge.mapper.StageMapper;
+import com.questforge.mapper.UserAnswerMapper;
 import com.questforge.mapper.UserStageProgressMapper;
 import com.questforge.service.UserStageService;
 import lombok.RequiredArgsConstructor;
@@ -21,8 +27,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -33,6 +43,9 @@ public class UserStageServiceImpl implements UserStageService {
     private final UserStageProgressMapper progressMapper;
     private final LearningProjectMapper projectMapper;
     private final StageMapper stageMapper;
+    private final StageItemRefMapper stageItemRefMapper;
+    private final QuestionBankMapper questionBankMapper;
+    private final UserAnswerMapper userAnswerMapper;
     private final RabbitTemplate rabbitTemplate;
 
     @Override
@@ -53,7 +66,20 @@ public class UserStageServiceImpl implements UserStageService {
         UserStageProgress progress = progressMapper.selectOne(new LambdaQueryWrapper<UserStageProgress>()
                 .eq(UserStageProgress::getUserId, userId).eq(UserStageProgress::getStageId, stageId));
 
-        if (progress == null || progress.getStatus() == 0) {
+        // 首次进入: 若为可解锁状态(第一关 或 前置关卡均已通关), 自动初始化进度记录
+        if (progress == null) {
+            if (!isStageUnlockable(stage, userId)) {
+                throw new RuntimeException("当前关卡尚未解锁，请先完成前置关卡！");
+            }
+            progress = new UserStageProgress();
+            progress.setUserId(userId);
+            progress.setProjectId(stage.getProjectId());
+            progress.setStageId(stageId);
+            progress.setStatus(1);
+            progressMapper.insert(progress);
+        }
+
+        if (progress.getStatus() == 0) {
             throw new RuntimeException("当前关卡尚未解锁，请先完成前置关卡！");
         }
 
@@ -61,20 +87,106 @@ public class UserStageServiceImpl implements UserStageService {
             progress.setStatus(2);
             progress.setStartTime(now);
             progressMapper.updateById(progress);
-        } else if (progress.getStatus() >= 3) {
-            throw new RuntimeException("该关卡已结算，无法重复挑战");
+        } else if (progress.getStatus() == 5) {
+            // 未通关允许重新挑战: 清理旧答题明细并重置状态
+            userAnswerMapper.delete(new LambdaQueryWrapper<UserAnswer>()
+                    .eq(UserAnswer::getProgressId, progress.getId()));
+            progress.setStatus(2);
+            progress.setStartTime(now);
+            progress.setCurrentScore(0);
+            progressMapper.updateById(progress);
+        } else if (progress.getStatus() == 3) {
+            throw new RuntimeException("该关卡正在结算中，请稍后查看结果");
+        } else if (progress.getStatus() == 4) {
+            throw new RuntimeException("该关卡已通关，无法重复挑战");
         }
 
         String stageCacheKey = RedisConsts.STAGE_INFO_PREFIX + stageId;
         Object stageJsonStr = redisTemplate.opsForValue().get(stageCacheKey);
-        if (stageJsonStr == null) throw new RuntimeException("关卡数据缓存异常，请联系管理员");
-
-        Map<String, Object> stageData = JSONUtil.parseObj((String) stageJsonStr);
+        Map<String, Object> stageData;
+        if (stageJsonStr == null) {
+            // 缓存缺失: 从数据库构建关卡快照并预热(不含标准答案)
+            stageData = buildStageSnapshot(stage);
+            redisTemplate.opsForValue().set(stageCacheKey, JSONUtil.toJsonStr(stageData), 12, TimeUnit.HOURS);
+        } else {
+            stageData = JSONUtil.parseObj((String) stageJsonStr);
+        }
         stageData.put("allowSwitchScreen", project.getAllowSwitchScreen() == 1);
         stageData.put("allowQuit", project.getAllowQuit() == 1);
         stageData.put("serverTime", System.currentTimeMillis() / 1000);
 
         return stageData;
+    }
+
+    /**
+     * 判断关卡是否可解锁: 第一关 或 所有前置关卡均已通关
+     */
+    private boolean isStageUnlockable(Stage stage, Long userId) {
+        List<Stage> prevStages = stageMapper.selectList(new LambdaQueryWrapper<Stage>()
+                .eq(Stage::getProjectId, stage.getProjectId())
+                .lt(Stage::getSortOrder, stage.getSortOrder()));
+        if (prevStages.isEmpty()) return true;
+
+        List<Long> prevIds = prevStages.stream().map(Stage::getId).collect(Collectors.toList());
+        Long passedCount = progressMapper.selectCount(new LambdaQueryWrapper<UserStageProgress>()
+                .eq(UserStageProgress::getUserId, userId)
+                .in(UserStageProgress::getStageId, prevIds)
+                .eq(UserStageProgress::getStatus, 4));
+        return passedCount >= prevStages.size();
+    }
+
+    /**
+     * 从数据库构建关卡快照(题目不携带标准答案)
+     */
+    private Map<String, Object> buildStageSnapshot(Stage stage) {
+        List<StageItemRef> refs = stageItemRefMapper.selectList(new LambdaQueryWrapper<StageItemRef>()
+                .eq(StageItemRef::getStageId, stage.getId())
+                .eq(StageItemRef::getItemType, 2)
+                .orderByAsc(StageItemRef::getSortNum));
+
+        List<Map<String, Object>> questions = new ArrayList<>();
+        if (!refs.isEmpty()) {
+            List<Long> qIds = refs.stream().map(StageItemRef::getItemId).collect(Collectors.toList());
+            Map<Long, QuestionBank> qMap = questionBankMapper.selectBatchIds(qIds).stream()
+                    .collect(Collectors.toMap(QuestionBank::getId, q -> q));
+
+            for (StageItemRef ref : refs) {
+                QuestionBank q = qMap.get(ref.getItemId());
+                if (q == null) continue;
+                Map<String, Object> qData = new HashMap<>();
+                qData.put("id", q.getId().toString());
+                qData.put("type", q.getType());
+                qData.put("content", q.getContent());
+                qData.put("options", parseOptions(q.getOptionsJson()));
+                qData.put("scoreWeight", ref.getScoreWeight());
+                questions.add(qData);
+            }
+        }
+
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("stageId", stage.getId().toString());
+        snapshot.put("stageName", stage.getStageName());
+        snapshot.put("stageType", stage.getStageType());
+        snapshot.put("duration", stage.getDurationMins());
+        snapshot.put("totalScore", stage.getTotalScore());
+        snapshot.put("gemReward", stage.getGemReward());
+        snapshot.put("questions", questions);
+        return snapshot;
+    }
+
+    /**
+     * optionsJson 兼容: 可能为 JSON 字符串或已被 JacksonTypeHandler 反序列化的对象
+     */
+    private Object parseOptions(Object optionsJson) {
+        if (optionsJson == null) return new ArrayList<>();
+        if (optionsJson instanceof String str) {
+            try {
+                return JSONUtil.parseArray(str);
+            } catch (Exception e) {
+                return new ArrayList<>();
+            }
+        }
+        return optionsJson;
     }
 
     @Override

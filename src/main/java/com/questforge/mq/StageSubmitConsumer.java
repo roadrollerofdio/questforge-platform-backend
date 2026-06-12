@@ -11,6 +11,8 @@ import com.questforge.mapper.StageItemRefMapper;
 import com.questforge.mapper.StageMapper;
 import com.questforge.mapper.UserAnswerMapper;
 import com.questforge.mapper.UserStageProgressMapper;
+import com.questforge.service.DailyTaskService;
+import com.questforge.service.GemService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
@@ -32,6 +34,8 @@ public class StageSubmitConsumer {
     private final UserAnswerMapper userAnswerMapper;
     private final StageMapper stageMapper;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final GemService gemService;
+    private final DailyTaskService dailyTaskService;
 
     @RabbitListener(queues = RabbitMQConfig.EXAM_SUBMIT_QUEUE)
     @Transactional(rollbackFor = Exception.class)
@@ -107,9 +111,28 @@ public class StageSubmitConsumer {
                 .set(UserStageProgress::getCurrentScore, finalScore)
                 .eq(UserStageProgress::getId, progress.getId()));
 
+        int gemsEarned = 0;
         if (nextStatus == 4) {
             unlockNextStage(currentStage, msg.getUserId(), msg.getProjectId());
+
+            // 通关奖励宝石: enterStage 限制同一关卡只能结算一次, 故此处不会重复发放
+            gemsEarned = currentStage.getGemReward() != null ? currentStage.getGemReward() : 0;
+            if (gemsEarned > 0) {
+                gemService.addGems(msg.getUserId(), gemsEarned);
+            }
+
+            // 每日任务事件: 完成关卡 / 无错通关
+            dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_COMPLETE);
+            boolean isPerfect = !answersToInsert.isEmpty()
+                    && answersToInsert.stream().allMatch(a -> a.getIsCorrect() != null && a.getIsCorrect() == 1);
+            if (isPerfect) {
+                dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_PERFECT);
+            }
         }
+
+        // 缓存本次结算获得的宝石, 供结算页展示 (24h)
+        redisTemplate.opsForValue().set(RedisConsts.STAGE_GEMS_PREFIX + progress.getId(),
+                String.valueOf(gemsEarned), 24, java.util.concurrent.TimeUnit.HOURS);
 
         redisTemplate.delete(sessionKey);
         String leaderboardKey = RedisConsts.LEADERBOARD_PREFIX + msg.getProjectId();
@@ -129,7 +152,14 @@ public class StageSubmitConsumer {
             UserStageProgress nextProgress = progressMapper.selectOne(new LambdaQueryWrapper<UserStageProgress>()
                     .eq(UserStageProgress::getUserId, userId).eq(UserStageProgress::getStageId, nextStage.getId()));
 
-            if (nextProgress != null && nextProgress.getStatus() == 0) {
+            if (nextProgress == null) {
+                nextProgress = new UserStageProgress();
+                nextProgress.setUserId(userId);
+                nextProgress.setProjectId(projectId);
+                nextProgress.setStageId(nextStage.getId());
+                nextProgress.setStatus(1);
+                progressMapper.insert(nextProgress);
+            } else if (nextProgress.getStatus() == 0) {
                 nextProgress.setStatus(1);
                 progressMapper.updateById(nextProgress);
             }

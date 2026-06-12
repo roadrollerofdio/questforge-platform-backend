@@ -14,7 +14,7 @@ import java.util.List;
  * 管理端 API：知识域(科目)分类管理中心
  */
 @RestController
-@RequestMapping("/api/admin/subject")
+@RequestMapping("/admin/subject")
 @PreAuthorize("hasRole('ADMIN')")
 @RequiredArgsConstructor
 public class AdminSubjectController {
