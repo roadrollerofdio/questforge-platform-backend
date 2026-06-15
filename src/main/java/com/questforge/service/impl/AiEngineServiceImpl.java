@@ -44,7 +44,7 @@ public class AiEngineServiceImpl implements AiEngineService {
         try {
             QuestionBank q = questionBankMapper.selectById(questionId);
             if (q == null) {
-                emitter.send(SseEmitter.event().data("【系统异常】未找到题库数据。"));
+                emitter.send(SseEmitter.event().data("【系统异常】未找到题库数据。", MediaType.TEXT_PLAIN));
                 emitter.complete();
                 return;
             }
@@ -95,7 +95,7 @@ public class AiEngineServiceImpl implements AiEngineService {
         try {
             QuestionBank q = questionBankMapper.selectById(questionId);
             if (q == null) {
-                emitter.send(SseEmitter.event().data("【系统异常】未找到题库数据。"));
+                emitter.send(SseEmitter.event().data("【系统异常】未找到题库数据。", MediaType.TEXT_PLAIN));
                 emitter.complete();
                 return;
             }
@@ -159,6 +159,27 @@ public class AiEngineServiceImpl implements AiEngineService {
     }
 
     /**
+     * 将底层 LLM 调用异常翻译为对用户友好的明确提示
+     */
+    private String buildUserFacingError(Throwable error) {
+        if (error instanceof org.springframework.web.reactive.function.client.WebClientResponseException wcre) {
+            int status = wcre.getStatusCode().value();
+            switch (status) {
+                case 401:
+                case 403:
+                    return "\n[AI 鉴权失败：API Key 无效，请在系统设置中检查 AI 密钥]";
+                case 402:
+                    return "\n[AI 服务账户余额不足，请充值后重试，或在系统设置中更换可用的 API Key]";
+                case 429:
+                    return "\n[AI 请求过于频繁，请稍后再试]";
+                default:
+                    return "\n[AI 服务返回错误(" + status + ")，请稍后再试或检查 AI 配置]";
+            }
+        }
+        return "\n[AI 暂时离开了，请检查网络或 API 配置]";
+    }
+
+    /**
      * 通用 LLM 流式对话：组装 OpenAI 规范 Payload，经 WebClient 订阅并透传给 SseEmitter
      */
     private void streamLlmChat(String systemPrompt, String userContent, SseEmitter emitter) {
@@ -175,15 +196,6 @@ public class AiEngineServiceImpl implements AiEngineService {
         String apiKey = sysConfigService.getAiApiKey();
         String apiUrl = sysConfigService.getAiApiUrl();
         String modelName = sysConfigService.getAiModel();
-
-        // #region agent log
-        com.questforge.common.DebugLog.log("H-D/H-E", "AiEngineServiceImpl:streamLlmMessages", "llm request config",
-                "{\"apiUrl\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(apiUrl))
-                + ",\"model\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(modelName))
-                + ",\"keyLength\":" + (apiKey == null ? -1 : apiKey.length())
-                + ",\"keyPrefix\":" + cn.hutool.json.JSONUtil.quote(apiKey == null || apiKey.isBlank() ? "(EMPTY)" : apiKey.substring(0, Math.min(6, apiKey.length())))
-                + ",\"messageCount\":" + messages.size() + "}");
-        // #endregion
 
         JSONObject payload = new JSONObject();
         payload.set("model", modelName);
@@ -217,7 +229,8 @@ public class AiEngineServiceImpl implements AiEngineService {
                             JSONObject delta = choices.getJSONObject(0).getJSONObject("delta");
                             String textContent = delta.getStr("content");
                             if (textContent != null) {
-                                emitter.send(SseEmitter.event().data(textContent));
+                                // 显式指定 text/plain, 避免 Spring 用 JSON 转换器把字符串 token 序列化成带引号/转义的内容
+                                emitter.send(SseEmitter.event().data(textContent, MediaType.TEXT_PLAIN));
                             }
                         }
                     } catch (Exception e) {
@@ -226,22 +239,8 @@ public class AiEngineServiceImpl implements AiEngineService {
                 },
                 error -> {
                     log.error("AI WebClient 请求发生异常", error);
-                    // #region agent log
-                    String errDetail = error.getMessage();
-                    String respBody = "";
-                    int statusCode = -1;
-                    if (error instanceof org.springframework.web.reactive.function.client.WebClientResponseException wcre) {
-                        statusCode = wcre.getStatusCode().value();
-                        respBody = wcre.getResponseBodyAsString();
-                    }
-                    com.questforge.common.DebugLog.log("H-D/H-E/H-F", "AiEngineServiceImpl:errorCallback", "llm request failed",
-                            "{\"errorClass\":" + cn.hutool.json.JSONUtil.quote(error.getClass().getName())
-                            + ",\"errorMsg\":" + cn.hutool.json.JSONUtil.quote(String.valueOf(errDetail))
-                            + ",\"httpStatus\":" + statusCode
-                            + ",\"responseBody\":" + cn.hutool.json.JSONUtil.quote(respBody.length() > 400 ? respBody.substring(0, 400) : respBody) + "}");
-                    // #endregion
                     try {
-                        emitter.send(SseEmitter.event().data("\n[AI 暂时离开了，请检查网络或 API 配置]"));
+                        emitter.send(SseEmitter.event().data(buildUserFacingError(error), MediaType.TEXT_PLAIN));
                     } catch (IOException e) {
                         // ignore
                     }
@@ -259,7 +258,7 @@ public class AiEngineServiceImpl implements AiEngineService {
     public void streamGenerateQuestions(String documentText, SseEmitter emitter) {
         // 真实业务中同样使用 WebClient 请求，为了文档简洁，不重复列出相同的 WebClient 代码块。
         try {
-            emitter.send(SseEmitter.event().data("功能建设中，核心实现参考 Tutor 方法的 WebClient 代码..."));
+            emitter.send(SseEmitter.event().data("功能建设中，核心实现参考 Tutor 方法的 WebClient 代码...", MediaType.TEXT_PLAIN));
             emitter.complete();
         } catch (IOException e) {
             emitter.completeWithError(e);

@@ -154,9 +154,23 @@ public class AdminProjectController {
             return Result.error(400, "项目不存在或非草稿状态");
         }
 
-        Long stageCount = stageMapper.selectCount(new LambdaQueryWrapper<Stage>().eq(Stage::getProjectId, projectId));
-        if (stageCount == 0) {
+        List<Stage> stages = stageMapper.selectList(
+                new LambdaQueryWrapper<Stage>().eq(Stage::getProjectId, projectId));
+        if (stages.isEmpty()) {
             return Result.error(400, "该学习路线图下没有任何关卡，拒绝发布");
+        }
+
+        // 校验每个关卡的及格分不得高于题目总分，否则该关卡永远无法通关、后续关卡将被永久锁死
+        List<String> impossibleStages = new ArrayList<>();
+        for (Stage stage : stages) {
+            int total = stage.getTotalScore() != null ? stage.getTotalScore() : 0;
+            int pass = stage.getPassScoreThreshold() != null ? stage.getPassScoreThreshold() : 0;
+            if (pass > total) {
+                impossibleStages.add(String.format("「%s」(及格 %d 分 > 题目总分 %d 分)", stage.getStageName(), pass, total));
+            }
+        }
+        if (!impossibleStages.isEmpty()) {
+            return Result.error(400, "以下关卡的及格分高于题目总分，将无法通关，请调整及格分或补充题目后再发布：" + String.join("；", impossibleStages));
         }
 
         project.setStatus(1);

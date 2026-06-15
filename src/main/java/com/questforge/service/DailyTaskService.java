@@ -10,6 +10,7 @@ import com.questforge.mapper.UserDailyTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
@@ -120,8 +121,9 @@ public class DailyTaskService {
 
     /**
      * 任务事件埋点入口: 推进匹配类型任务的进度, 完成即发宝石
+     * 使用 REQUIRES_NEW 独立事务: 任务推进/发奖失败不得回滚调用方(如关卡判分)的核心事务
      */
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public void onEvent(Long userId, String eventType) {
         try {
             LocalDate today = LocalDate.now();

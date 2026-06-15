@@ -6,6 +6,8 @@ import com.questforge.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 宝石账户服务: 加/扣宝石
@@ -19,7 +21,9 @@ public class GemService {
 
     /**
      * 发放宝石
+     * 使用 REQUIRES_NEW 独立事务: 发奖失败不得回滚调用方(如关卡判分)的核心事务
      */
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public void addGems(Long userId, int amount) {
         if (amount <= 0) return;
         sysUserMapper.update(null, new LambdaUpdateWrapper<SysUser>()

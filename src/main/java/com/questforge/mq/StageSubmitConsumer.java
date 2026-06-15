@@ -101,6 +101,17 @@ public class StageSubmitConsumer {
         }
 
         Stage currentStage = stageMapper.selectById(msg.getStageId());
+        if (currentStage == null) {
+            // 关卡在结算期间被删除: 仅落库判分结果, 避免 NPE 导致事务回滚使进度永久卡在“判分中”
+            progressMapper.update(null, new LambdaUpdateWrapper<UserStageProgress>()
+                    .set(UserStageProgress::getStatus, 5)
+                    .set(UserStageProgress::getCurrentScore, finalScore)
+                    .eq(UserStageProgress::getId, progress.getId()));
+            redisTemplate.delete(sessionKey);
+            log.warn("【关卡结算】关卡已不存在, 仅记录得分并结束: StageID = {}", msg.getStageId());
+            return;
+        }
+
         int nextStatus = 5;
         if (currentStage.getPassScoreThreshold() == null || finalScore >= currentStage.getPassScoreThreshold()) {
             nextStatus = 4;
@@ -117,16 +128,22 @@ public class StageSubmitConsumer {
 
             // 通关奖励宝石: enterStage 限制同一关卡只能结算一次, 故此处不会重复发放
             gemsEarned = currentStage.getGemReward() != null ? currentStage.getGemReward() : 0;
-            if (gemsEarned > 0) {
-                gemService.addGems(msg.getUserId(), gemsEarned);
-            }
 
-            // 每日任务事件: 完成关卡 / 无错通关
-            dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_COMPLETE);
-            boolean isPerfect = !answersToInsert.isEmpty()
-                    && answersToInsert.stream().allMatch(a -> a.getIsCorrect() != null && a.getIsCorrect() == 1);
-            if (isPerfect) {
-                dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_PERFECT);
+            // 积分/每日任务为独立事务的副作用, 任何失败都不得回滚已完成的判分结果
+            try {
+                if (gemsEarned > 0) {
+                    gemService.addGems(msg.getUserId(), gemsEarned);
+                }
+
+                dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_COMPLETE);
+                boolean isPerfect = !answersToInsert.isEmpty()
+                        && answersToInsert.stream().allMatch(a -> a.getIsCorrect() != null && a.getIsCorrect() == 1);
+                if (isPerfect) {
+                    dailyTaskService.onEvent(msg.getUserId(), DailyTaskService.EVENT_STAGE_PERFECT);
+                }
+            } catch (Exception e) {
+                log.error("【关卡结算】发放宝石或推进每日任务失败(不影响判分结果): userId={}, stageId={}",
+                        msg.getUserId(), msg.getStageId(), e);
             }
         }
 
