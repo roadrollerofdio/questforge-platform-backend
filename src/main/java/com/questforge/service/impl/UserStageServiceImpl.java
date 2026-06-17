@@ -96,7 +96,24 @@ public class UserStageServiceImpl implements UserStageService {
             progress.setCurrentScore(0);
             progressMapper.updateById(progress);
         } else if (progress.getStatus() == 3) {
-            throw new RuntimeException("该关卡正在结算中，请稍后查看结果");
+            // 超时兜底: 消费者异常未处理时, 进度会永久卡在"判分中"(status=3)
+            // 若距 completeTime 已超过 5 分钟, 说明结算已失败, 视为未通关并允许重新挑战
+            if (progress.getCompleteTime() != null) {
+                long stuckMinutes = java.time.Duration.between(progress.getCompleteTime(), now).toMinutes();
+                if (stuckMinutes >= 5) {
+                    userAnswerMapper.delete(new LambdaQueryWrapper<UserAnswer>()
+                            .eq(UserAnswer::getProgressId, progress.getId()));
+                    progress.setStatus(2);
+                    progress.setStartTime(now);
+                    progress.setCurrentScore(0);
+                    progressMapper.updateById(progress);
+                    log.warn("【关卡恢复】进度卡在结算中超过 {} 分钟, 已自动重置为重新挑战: progressId={}", stuckMinutes, progress.getId());
+                } else {
+                    throw new RuntimeException("该关卡正在结算中，请稍后查看结果");
+                }
+            } else {
+                throw new RuntimeException("该关卡正在结算中，请稍后查看结果");
+            }
         } else if (progress.getStatus() == 4) {
             throw new RuntimeException("该关卡已通关，无法重复挑战");
         }

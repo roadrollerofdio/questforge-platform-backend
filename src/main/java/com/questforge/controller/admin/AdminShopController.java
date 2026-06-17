@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * 管理端：宝石小店商品管理(上架/下架/定价)
+ * 管理端：宝石小店商品管理
  */
 @RestController
 @RequestMapping("/admin/shop")
@@ -26,7 +26,7 @@ public class AdminShopController {
     private final ShopItemMapper shopItemMapper;
 
     /**
-     * 全部商品(含已下架)
+     * 全部商品
      */
     @GetMapping("/items")
     public Result<List<ShopItem>> listItems() {
@@ -35,7 +35,7 @@ public class AdminShopController {
     }
 
     /**
-     * 新增/编辑商品(svgKey 必须取自前端内置装扮部件库)
+     * 新增/编辑商品
      */
     @PostMapping("/items/save")
     public Result<Long> saveItem(@RequestBody @Valid ItemSaveReq req) {

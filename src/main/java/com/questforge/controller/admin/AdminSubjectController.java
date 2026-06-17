@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 /**
- * 管理端 API：知识域(科目)分类管理中心
+ * 管理端 API：
  */
 @RestController
 @RequestMapping("/admin/subject")

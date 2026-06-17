@@ -15,7 +15,6 @@ public class MyMetaObjectHandler implements MetaObjectHandler {
 
     @Override
     public void insertFill(MetaObject metaObject) {
-        // 使用更稳定强硬的 setFieldValByName 替代 strictInsertFill，解决类型推断可能导致的填充失效
         this.setFieldValByName("createTime", LocalDateTime.now(), metaObject);
         this.setFieldValByName("updateTime", LocalDateTime.now(), metaObject);
     }

@@ -19,6 +19,8 @@ import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -62,7 +64,7 @@ public class StageSubmitConsumer {
         for (StageItemRef ref : itemRefs) {
             Long qId = ref.getItemId();
             QuestionBank stdQ = stdMap.get(qId);
-            String uAns = (String) userAnswersMap.get(qId.toString());
+            String uAns = extractAnswer(userAnswersMap.get(qId.toString()));
 
             int actualScore = 0;
             int isCorrect = 0;
@@ -96,13 +98,22 @@ public class StageSubmitConsumer {
             answersToInsert.add(detail);
         }
 
+        // 答案明细写入加容错: 个别题目落库失败(如 DB 约束/字段超长) 不阻断核心判分流程
+        // 已失败的可通过重新提交恢复(enterStage 会清理旧答题明细)
+        int savedCount = 0;
         for (UserAnswer ans : answersToInsert) {
-            userAnswerMapper.insert(ans);
+            try {
+                userAnswerMapper.insert(ans);
+                savedCount++;
+            } catch (Exception e) {
+                log.warn("【关卡结算】答题明细写入失败(不影响判分): progressId={}, questionId={}, err={}",
+                        progress.getId(), ans.getQuestionId(), e.getMessage());
+            }
         }
+        log.info("【关卡结算】答题明细写入: 总数={}, 成功={}", answersToInsert.size(), savedCount);
 
         Stage currentStage = stageMapper.selectById(msg.getStageId());
         if (currentStage == null) {
-            // 关卡在结算期间被删除: 仅落库判分结果, 避免 NPE 导致事务回滚使进度永久卡在“判分中”
             progressMapper.update(null, new LambdaUpdateWrapper<UserStageProgress>()
                     .set(UserStageProgress::getStatus, 5)
                     .set(UserStageProgress::getCurrentScore, finalScore)
@@ -126,10 +137,8 @@ public class StageSubmitConsumer {
         if (nextStatus == 4) {
             unlockNextStage(currentStage, msg.getUserId(), msg.getProjectId());
 
-            // 通关奖励宝石: enterStage 限制同一关卡只能结算一次, 故此处不会重复发放
             gemsEarned = currentStage.getGemReward() != null ? currentStage.getGemReward() : 0;
 
-            // 积分/每日任务为独立事务的副作用, 任何失败都不得回滚已完成的判分结果
             try {
                 if (gemsEarned > 0) {
                     gemService.addGems(msg.getUserId(), gemsEarned);
@@ -147,15 +156,47 @@ public class StageSubmitConsumer {
             }
         }
 
-        // 缓存本次结算获得的宝石, 供结算页展示 (24h)
-        redisTemplate.opsForValue().set(RedisConsts.STAGE_GEMS_PREFIX + progress.getId(),
-                String.valueOf(gemsEarned), 24, java.util.concurrent.TimeUnit.HOURS);
-
-        redisTemplate.delete(sessionKey);
-        String leaderboardKey = RedisConsts.LEADERBOARD_PREFIX + msg.getProjectId();
-        redisTemplate.opsForZSet().incrementScore(leaderboardKey, msg.getUserId().toString(), finalScore);
+        // Redis 操作延迟到事务提交后: 避免 Redis 故障导致整个事务回滚(stage 永久卡在判分中)
+        registerRedisOpsAfterCommit(sessionKey, progress.getId(), gemsEarned, nextStatus,
+                msg.getProjectId(), msg.getUserId(), finalScore);
 
         log.info("【关卡结算完成】ProgressID: {}, 得分: {}, 结果: {}", msg.getProgressId(), finalScore, nextStatus == 4 ? "通关" : "失败");
+    }
+
+    /**
+     * 安全提取 Redis 中保存的用户答案: 兼容 JSON 反序列化产生的各种类型
+     * GenericJackson2JsonRedisSerializer 对 String 值可能产生 String / Map / Number 等不同类型
+     */
+    private String extractAnswer(Object value) {
+        if (value == null) return null;
+        if (value instanceof String s) return s;
+        if (value instanceof Number n) return n.toString();
+        if (value instanceof Map) return String.valueOf(((Map<?, ?>) value).get("value"));
+        return value.toString();
+    }
+
+    /**
+     * 将 Redis 后处理操作注册为事务同步回调, 确保 DB 事务提交成功后才执行
+     * 这样即使 Redis 故障也不会回滚已完成的判分结果
+     */
+    private void registerRedisOpsAfterCommit(String sessionKey, Long progressId, int gemsEarned,
+                                            int status, Long projectId, Long userId, int finalScore) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    if (gemsEarned > 0 || status == 4) {
+                        redisTemplate.opsForValue().set(RedisConsts.STAGE_GEMS_PREFIX + progressId,
+                                String.valueOf(gemsEarned), 24, java.util.concurrent.TimeUnit.HOURS);
+                    }
+                    redisTemplate.delete(sessionKey);
+                    String leaderboardKey = RedisConsts.LEADERBOARD_PREFIX + projectId;
+                    redisTemplate.opsForZSet().incrementScore(leaderboardKey, userId.toString(), finalScore);
+                } catch (Exception e) {
+                    log.error("【关卡结算】Redis 后处理失败(判分已落库, 不影响结果): progressId={}", progressId, e);
+                }
+            }
+        });
     }
 
     private void unlockNextStage(Stage currentStage, Long userId, Long projectId) {

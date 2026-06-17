@@ -1,10 +1,11 @@
 package com.questforge.service;
 
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.questforge.entity.SysUser;
 import com.questforge.mapper.SysUserMapper;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -12,12 +13,16 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 宝石账户服务: 加/扣宝石
  */
-@Slf4j
 @Service
-@RequiredArgsConstructor
 public class GemService {
 
+    private static final Logger log = LoggerFactory.getLogger(GemService.class);
+
     private final SysUserMapper sysUserMapper;
+
+    public GemService(SysUserMapper sysUserMapper) {
+        this.sysUserMapper = sysUserMapper;
+    }
 
     /**
      * 发放宝石
@@ -26,9 +31,9 @@ public class GemService {
     @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
     public void addGems(Long userId, int amount) {
         if (amount <= 0) return;
-        sysUserMapper.update(null, new LambdaUpdateWrapper<SysUser>()
+        sysUserMapper.update(null, new UpdateWrapper<SysUser>()
                 .setSql("gems = IFNULL(gems, 0) + " + amount)
-                .eq(SysUser::getId, userId));
+                .eq("id", userId));
         log.info("【宝石发放】用户 {} 获得 {} 宝石", userId, amount);
     }
 
@@ -37,10 +42,10 @@ public class GemService {
      */
     public void deductGems(Long userId, int amount) {
         if (amount <= 0) return;
-        int updated = sysUserMapper.update(null, new LambdaUpdateWrapper<SysUser>()
+        int updated = sysUserMapper.update(null, new UpdateWrapper<SysUser>()
                 .setSql("gems = gems - " + amount)
-                .eq(SysUser::getId, userId)
-                .ge(SysUser::getGems, amount));
+                .eq("id", userId)
+                .ge("gems", amount));
         if (updated == 0) {
             throw new RuntimeException("宝石余额不足");
         }
@@ -48,7 +53,13 @@ public class GemService {
     }
 
     public int getBalance(Long userId) {
-        SysUser user = sysUserMapper.selectById(userId);
-        return user != null && user.getGems() != null ? user.getGems() : 0;
+        return sysUserMapper.selectMaps(new QueryWrapper<SysUser>()
+                        .select("gems")
+                        .eq("id", userId))
+                .stream()
+                .findFirst()
+                .map(row -> row.get("gems"))
+                .map(v -> v instanceof Number n ? n.intValue() : 0)
+                .orElse(0);
     }
 }

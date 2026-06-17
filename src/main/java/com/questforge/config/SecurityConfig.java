@@ -51,7 +51,7 @@ public class SecurityConfig {
         http
                 // 禁用 CSRF，因为我们使用 JWT 进行鉴权，天然防御 CSRF
                 .csrf(AbstractHttpConfigurer::disable)
-                // 禁用 CORS (实际项目中通常在 Nginx 或配置类全局放行)
+                // 禁用 CORS
                 .cors(AbstractHttpConfigurer::disable)
                 // 设置为无状态，不创建 Session，完全依赖 JWT
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

@@ -7,7 +7,7 @@ public class RedisConsts {
     // 试卷缓存 (Type: String/JSON) TTL: 考试时长 + 30m
     public static final String PAPER_INFO_PREFIX = "exam:paper:info:";
 
-    // ====== 新增：关卡数据预热缓存（修复 UserStageServiceImpl 报错） ======
+    // ====== 关卡数据预热缓存 ======
     public static final String STAGE_INFO_PREFIX = "exam:stage:info:";
 
     // 用户答题会话 (Type: Hash) 考完主动删，兜底 12h

@@ -54,7 +54,6 @@ public class AuthController {
         AuthDto.LoginResp resp = new AuthDto.LoginResp();
         resp.setToken(token);
 
-        // 【已修复】：AuthDto 中 userId 为 Long，直接传入 user.getId() 即可
         resp.setUserId(user.getId());
 
         resp.setRole("ROLE_" + user.getRoleCode());
