@@ -3,10 +3,13 @@ package com.questforge.controller.user;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.questforge.common.RedisConsts;
 import com.questforge.common.Result;
+import com.questforge.dto.AnalysisDto;
 import com.questforge.dto.StageDto;
+import com.questforge.entity.QuestionBank;
 import com.questforge.entity.Stage;
 import com.questforge.entity.UserAnswer;
 import com.questforge.entity.UserStageProgress;
+import com.questforge.mapper.QuestionBankMapper;
 import com.questforge.mapper.StageMapper;
 import com.questforge.mapper.UserAnswerMapper;
 import com.questforge.mapper.UserStageProgressMapper;
@@ -24,6 +27,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 用户端：学习地图、沉浸式挑战与结算反馈
@@ -37,6 +41,7 @@ public class UserStageController {
     private final StageMapper stageMapper;
     private final UserStageProgressMapper progressMapper;
     private final UserAnswerMapper userAnswerMapper;
+    private final QuestionBankMapper questionBankMapper;
     private final UserProfileService userProfileService;
     private final RedisTemplate<String, Object> redisTemplate;
 
@@ -85,6 +90,7 @@ public class UserStageController {
             node.put("passScoreThreshold", stage.getPassScoreThreshold());
             node.put("status", status); // 决定前端节点颜色与是否解锁
             node.put("currentScore", progress != null ? progress.getCurrentScore() : 0);
+            node.put("progressId", progress != null ? progress.getId().toString() : null);
 
             resultList.add(node);
         }
@@ -164,6 +170,61 @@ public class UserStageController {
 
         // 项目排行榜 Top 20 (带 userId / 昵称 / 形象, 供加好友与头像渲染)
         data.put("leaderboard", buildLeaderboard(progress.getProjectId(), userId));
+
+        return Result.success(data);
+    }
+
+    /**
+     * 核心接口 6：拉取本次通关的错题清单 (详情页错题精讲 Tab 使用)
+     * 支持状态 4(已通关) 与 5(未通关) 的进度, 用于复盘
+     */
+    @GetMapping("/{progressId}/wrong-questions")
+    public Result<Map<String, Object>> getWrongQuestions(@PathVariable Long progressId) {
+        Long userId = getCurrentUserId();
+
+        UserStageProgress progress = progressMapper.selectById(progressId);
+        if (progress == null || !progress.getUserId().equals(userId)) {
+            return Result.error(400, "未找到挑战记录");
+        }
+        if (progress.getStatus() == 3) {
+            return Result.error(400, "判分尚未完成, 请稍后再试");
+        }
+
+        // 基础信息
+        Stage stage = stageMapper.selectById(progress.getStageId());
+        Map<String, Object> data = new HashMap<>();
+        data.put("progressId", progressId.toString());
+        data.put("stageName", stage != null ? stage.getStageName() : "未知关卡");
+        data.put("projectId", progress.getProjectId().toString());
+        data.put("score", progress.getCurrentScore() == null ? 0 : progress.getCurrentScore());
+        data.put("totalScore", stage != null && stage.getTotalScore() != null ? stage.getTotalScore() : 0);
+        data.put("passed", progress.getStatus() == 4);
+
+        // 错题明细: 关联 exam_question 取题面与官方解析
+        List<UserAnswer> wrongAnswers = userAnswerMapper.selectList(new LambdaQueryWrapper<UserAnswer>()
+                .eq(UserAnswer::getProgressId, progressId)
+                .eq(UserAnswer::getIsCorrect, 0));
+
+        List<AnalysisDto.WrongQuestionResp> wrongList = new ArrayList<>();
+        if (!wrongAnswers.isEmpty()) {
+            List<Long> questionIds = wrongAnswers.stream()
+                    .map(UserAnswer::getQuestionId).collect(Collectors.toList());
+            Map<Long, QuestionBank> questionMap = questionBankMapper.selectBatchIds(questionIds).stream()
+                    .collect(Collectors.toMap(QuestionBank::getId, q -> q));
+
+            for (UserAnswer wa : wrongAnswers) {
+                QuestionBank q = questionMap.get(wa.getQuestionId());
+                AnalysisDto.WrongQuestionResp wq = new AnalysisDto.WrongQuestionResp();
+                wq.setQuestionId(wa.getQuestionId());
+                wq.setContent(q != null ? q.getContent() : "（题目已删除）");
+                wq.setUserAnswer(wa.getUserAnswer());
+                wq.setStandardAnswer(q != null ? q.getAnswer() : "-");
+                wq.setAnalysis(q != null ? q.getAiAnalysis() : null);
+                wrongList.add(wq);
+            }
+        }
+        data.put("wrongQuestions", wrongList);
+        data.put("wrongCount", wrongList.size());
 
         return Result.success(data);
     }

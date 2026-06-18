@@ -93,5 +93,6 @@ public class AnalysisDto {
         private String content;
         private String userAnswer;
         private String standardAnswer;
+        private String analysis;
     }
 }
